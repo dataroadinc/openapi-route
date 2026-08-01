@@ -1,0 +1,13 @@
+[package]
+name = "openapi-route-axum"
+description = "Axum and Swagger UI integration for openapi-route"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+axum.workspace = true
+openapi-route.workspace = true
+utoipa-swagger-ui.workspace = true
+
