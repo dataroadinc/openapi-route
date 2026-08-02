@@ -11,7 +11,7 @@ use openapi_route::{ApiCatalog, ApiService, Method, openapi_handler};
     response_type = "Task",
     error_type = "TaskError"
 )]
-/// Get task.
+/// `GET /tasks/{id}` — Get task.
 ///
 /// Returns one task.
 fn get_task() {}

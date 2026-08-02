@@ -88,7 +88,7 @@ fn extract_docs(function: &ItemFn) -> (Option<LitStr>, Option<LitStr>) {
     let Some(summary) = lines.first() else {
         return (None, None);
     };
-    let summary = LitStr::new(summary, function.sig.ident.span());
+    let summary = LitStr::new(&normalize_summary(summary), function.sig.ident.span());
     let description = if lines.len() > 1 {
         Some(LitStr::new(
             &lines[1..].join("\n"),
@@ -98,6 +98,18 @@ fn extract_docs(function: &ItemFn) -> (Option<LitStr>, Option<LitStr>) {
         None
     };
     (Some(summary), description)
+}
+
+fn normalize_summary(line: &str) -> String {
+    for separator in ['—', '–'] {
+        if let Some((_, summary)) = line.split_once(separator) {
+            return summary.trim().to_owned();
+        }
+    }
+    if let Some((_, summary)) = line.split_once("--") {
+        return summary.trim().to_owned();
+    }
+    line.trim_matches('`').trim().to_owned()
 }
 
 fn method_tokens(method: &str) -> Result<TokenStream> {
