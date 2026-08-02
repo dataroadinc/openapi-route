@@ -24,11 +24,19 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
     let parameters = metadata.parameters;
     let request_type = metadata
         .request_type
+        .or_else(|| infer_json_type(&function))
         .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
     let response_type = metadata
         .response_type
+        .or_else(|| infer_result_type(&function, 0))
         .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let inferred_error_type = infer_result_type(&function, 1);
     let error_types = metadata.error_types;
+    let error_types = if error_types.is_empty() {
+        inferred_error_type.into_iter().collect::<Vec<_>>()
+    } else {
+        error_types
+    };
     let parameter_tokens = parameters.iter().map(|parameter| {
         let name = &parameter.name;
         let description = parameter
@@ -110,6 +118,61 @@ fn normalize_summary(line: &str) -> String {
         return summary.trim().to_owned();
     }
     line.trim_matches('`').trim().to_owned()
+}
+
+fn infer_json_type(function: &ItemFn) -> Option<LitStr> {
+    function.sig.inputs.iter().find_map(|argument| {
+        let syn::FnArg::Typed(argument) = argument else {
+            return None;
+        };
+        let syn::Type::Path(path) = argument.ty.as_ref() else {
+            return None;
+        };
+        let segment = path.path.segments.last()?;
+        if segment.ident != "Json" {
+            return None;
+        }
+        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+            return None;
+        };
+        let syn::GenericArgument::Type(inner) = arguments.args.first()? else {
+            return None;
+        };
+        Some(LitStr::new(&type_name(inner), segment.ident.span()))
+    })
+}
+
+fn infer_result_type(function: &ItemFn, index: usize) -> Option<LitStr> {
+    let syn::ReturnType::Type(_, output) = &function.sig.output else {
+        return None;
+    };
+    let syn::Type::Path(path) = output.as_ref() else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(inner) = arguments.args.get(index)? else {
+        return None;
+    };
+    Some(LitStr::new(&type_name(inner), segment.ident.span()))
+}
+
+fn type_name(ty: &syn::Type) -> String {
+    match ty {
+        syn::Type::Path(path) => path
+            .path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::"),
+        _ => "Response".to_owned(),
+    }
 }
 
 fn method_tokens(method: &str) -> Result<TokenStream> {
