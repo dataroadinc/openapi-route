@@ -7,5 +7,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+inventory.workspace = true
 openapi-route-macros.workspace = true
 utoipa.workspace = true

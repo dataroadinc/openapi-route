@@ -1,6 +1,7 @@
 //! Framework-neutral route metadata and OpenAPI document generation.
 
 pub use openapi_route_macros::openapi_handler;
+pub use inventory;
 
 use utoipa::openapi::path::{
     HttpMethod, OperationBuilder, ParameterBuilder, ParameterIn, PathItem,
@@ -68,8 +69,40 @@ pub struct ApiService {
     pub name: &'static str,
     /// Service description used for its OpenAPI tag.
     pub description: &'static str,
-    /// Explicit service route catalog.
-    pub routes: &'static [RouteMetadata],
+}
+
+/// A route registered with an [`ApiService`] by an annotated handler.
+#[derive(Clone, Copy, Debug)]
+pub struct RegisteredRoute {
+    /// Service that owns the route.
+    pub service: &'static ApiService,
+    /// Handler-generated route metadata.
+    pub route: &'static RouteMetadata,
+}
+
+inventory::collect!(RegisteredRoute);
+
+/// Register manually declared route metadata with a service.
+#[macro_export]
+macro_rules! register_route {
+    ($service:path, $route:expr) => {
+        $crate::inventory::submit! {
+            $crate::RegisteredRoute {
+                service: &$service,
+                route: &$route,
+            }
+        }
+    };
+}
+
+impl ApiService {
+    /// Iterate over route metadata registered with this service.
+    pub fn routes(&self) -> impl Iterator<Item = &'static RouteMetadata> {
+        inventory::iter::<RegisteredRoute>
+            .into_iter()
+            .filter(move |registration| std::ptr::eq(registration.service, self))
+            .map(|registration| registration.route)
+    }
 }
 
 /// The complete route catalog used to generate one OpenAPI document.
@@ -80,7 +113,7 @@ pub struct ApiCatalog {
     /// OpenAPI version.
     pub version: &'static str,
     /// Services included in the document.
-    pub services: &'static [ApiService],
+    pub services: &'static [&'static ApiService],
 }
 
 impl ApiCatalog {
@@ -88,7 +121,7 @@ impl ApiCatalog {
     pub fn document(&self) -> OpenApi {
         let mut paths = PathsBuilder::new();
         for service in self.services {
-            for route in service.routes {
+            for route in service.routes() {
                 let mut operation = OperationBuilder::new()
                     .operation_id(Some(route.operation_id))
                     .summary(Some(route.summary));

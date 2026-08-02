@@ -4,6 +4,10 @@ use syn::{Error, ItemFn, LitStr, Result, parse::Parse, parse::ParseStream, token
 
 pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream> {
     let metadata: Metadata = syn::parse2(args)?;
+    let service = metadata
+        .service
+        .clone()
+        .unwrap_or_else(|| syn::parse_quote!(crate::API_SERVICE));
     let function_name = function.sig.ident.clone();
     let constant_name = format_ident!("OPENAPI_ROUTE_{}", function_name.to_string().to_uppercase());
     let method = method_tokens(&metadata.method)?;
@@ -68,6 +72,13 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
                 response_type: #response_type,
                 error_types: &[#(#error_types),*],
             };
+
+        ::openapi_route::inventory::submit! {
+            ::openapi_route::RegisteredRoute {
+                service: &#service,
+                route: &#constant_name,
+            }
+        }
     })
 }
 
@@ -214,6 +225,7 @@ fn method_tokens(method: &str) -> Result<TokenStream> {
 }
 
 struct Metadata {
+    service: Option<syn::Path>,
     method: String,
     path: LitStr,
     operation_id: Option<LitStr>,
@@ -234,6 +246,7 @@ struct Parameter {
 impl Parse for Metadata {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let mut method = None;
+        let mut service = None;
         let mut path = None;
         let mut operation_id = None;
         let mut summary = None;
@@ -247,22 +260,26 @@ impl Parse for Metadata {
         while !input.is_empty() {
             let key: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
-            let value: LitStr = input.parse()?;
-            match key.to_string().as_str() {
-                "method" => method = Some(value.value()),
-                "path" => path = Some(value),
-                "operation_id" => operation_id = Some(value),
-                "summary" => summary = Some(value),
-                "description" => description = Some(value),
-                "tag" => tags.push(value),
-                "parameter" => parameters.push(Parameter {
-                    name: value,
-                    description: None,
-                }),
-                "request_type" => request_type = Some(value),
-                "response_type" => response_type = Some(value),
-                "error_type" => error_types.push(value),
-                _ => return Err(Error::new(key.span(), "unknown openapi_handler option")),
+            if key == "service" {
+                service = Some(input.parse()?);
+            } else {
+                let value: LitStr = input.parse()?;
+                match key.to_string().as_str() {
+                    "method" => method = Some(value.value()),
+                    "path" => path = Some(value),
+                    "operation_id" => operation_id = Some(value),
+                    "summary" => summary = Some(value),
+                    "description" => description = Some(value),
+                    "tag" => tags.push(value),
+                    "parameter" => parameters.push(Parameter {
+                        name: value,
+                        description: None,
+                    }),
+                    "request_type" => request_type = Some(value),
+                    "response_type" => response_type = Some(value),
+                    "error_type" => error_types.push(value),
+                    _ => return Err(Error::new(key.span(), "unknown openapi_handler option")),
+                }
             }
             if input.peek(Comma) {
                 input.parse::<Comma>()?;
@@ -270,6 +287,7 @@ impl Parse for Metadata {
         }
 
         Ok(Self {
+            service,
             method: method
                 .ok_or_else(|| Error::new(proc_macro2::Span::call_site(), "method is required"))?,
             path: path

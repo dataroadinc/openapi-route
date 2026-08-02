@@ -1,12 +1,18 @@
-use openapi_route::{ApiCatalog, ApiService, Method, openapi_handler};
+use openapi_route::{ApiCatalog, Method, openapi_handler};
 
 struct Json<T>(T);
 struct Request;
 struct Response;
 struct Error;
 
+static API_SERVICE: openapi_route::ApiService = openapi_route::ApiService {
+    name: "tasks",
+    description: "Task operations",
+};
+
 #[allow(dead_code)]
 #[openapi_handler(
+    service = API_SERVICE,
     method = "GET",
     path = "/tasks/{id}",
     operation_id = "get_task",
@@ -27,23 +33,15 @@ fn create_task(_body: Json<Request>) -> Result<Json<Response>, Error> {
     panic!("test handler is never called")
 }
 
-static ROUTES: &[openapi_route::RouteMetadata] = &[OPENAPI_ROUTE_GET_TASK];
-
-static SERVICE: ApiService = ApiService {
-    name: "tasks",
-    description: "Task operations",
-    routes: ROUTES,
-};
-
 static CATALOG: ApiCatalog = ApiCatalog {
     title: "Test API",
     version: "0.1.0",
-    services: &[SERVICE],
+    services: &[&API_SERVICE],
 };
 
 #[test]
 fn macro_generates_explicit_route_metadata() {
-    let route = &ROUTES[0];
+    let route = &OPENAPI_ROUTE_GET_TASK;
     assert_eq!(route.method, Method::Get);
     assert_eq!(route.path, "/tasks/{id}");
     assert_eq!(route.operation_id, "get_task");
@@ -73,6 +71,13 @@ fn catalog_generates_openapi_paths_without_global_registration() {
         .and_then(|content| content.get("application/json"))
         .is_some());
     assert!(operation.responses.responses.contains_key("400"));
+}
+
+#[test]
+fn catalog_collects_routes_registered_for_each_service() {
+    let document = CATALOG.document();
+    assert!(document.paths.paths.contains_key("/tasks"));
+    assert!(document.paths.paths.contains_key("/tasks/{id}"));
 }
 
 #[test]
