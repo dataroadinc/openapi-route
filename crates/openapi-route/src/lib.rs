@@ -131,12 +131,22 @@ impl ApiCatalog {
                     || "Successful response".to_owned(),
                     |response_type| format!("Successful response containing {response_type}."),
                 );
-                let mut operation = operation.response(
-                    "200",
-                    ResponseBuilder::new()
-                        .description(success_description)
-                        .build(),
-                );
+                let success_response = ResponseBuilder::new().description(success_description);
+                let success_response = match route.response_type {
+                    Some(response_type) => success_response.content(
+                        "application/json",
+                        Content::new(Some(
+                            ObjectBuilder::new()
+                                .schema_type(Type::Object)
+                                .description(Some(format!(
+                                    "JSON response body: {response_type}."
+                                )))
+                                .build(),
+                        )),
+                    ),
+                    None => success_response,
+                };
+                let mut operation = operation.response("200", success_response.build());
                 if !route.error_types.is_empty() {
                     let error_description = format!(
                         "Request failed with one of: {}.",

@@ -62,6 +62,16 @@ fn catalog_generates_openapi_paths_without_global_registration() {
     let path = document.paths.paths.get("/tasks/{id}").expect("path");
     let operation = path.get.as_ref().expect("GET operation");
     assert!(operation.request_body.is_some());
+    assert!(operation
+        .responses
+        .responses
+        .get("200")
+        .and_then(|response| match response {
+            utoipa::openapi::RefOr::T(response) => Some(&response.content),
+            utoipa::openapi::RefOr::Ref(_) => None,
+        })
+        .and_then(|content| content.get("application/json"))
+        .is_some());
     assert!(operation.responses.responses.contains_key("400"));
 }
 
