@@ -9,5 +9,3 @@ rust-version.workspace = true
 [dependencies]
 axum.workspace = true
 openapi-route.workspace = true
-utoipa-swagger-ui.workspace = true
-
