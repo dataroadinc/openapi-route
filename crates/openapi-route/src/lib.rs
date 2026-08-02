@@ -5,9 +5,10 @@ pub use openapi_route_macros::openapi_handler;
 use utoipa::openapi::path::{
     HttpMethod, OperationBuilder, ParameterBuilder, ParameterIn, PathItem,
 };
+use utoipa::openapi::request_body::RequestBodyBuilder;
 use utoipa::openapi::response::ResponseBuilder;
 use utoipa::openapi::schema::{ObjectBuilder, Type};
-use utoipa::openapi::{Info, OpenApi, OpenApiBuilder, PathsBuilder, RefOr, Required};
+use utoipa::openapi::{Content, Info, OpenApi, OpenApiBuilder, PathsBuilder, RefOr, Required};
 
 /// HTTP methods understood by the route metadata layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +53,12 @@ pub struct RouteMetadata {
     pub tags: &'static [&'static str],
     /// Path parameters.
     pub parameters: &'static [RouteParameter],
+    /// Name of the request body type, when the handler accepts JSON.
+    pub request_type: Option<&'static str>,
+    /// Name of the successful response type, when known.
+    pub response_type: Option<&'static str>,
+    /// Names of handler error types.
+    pub error_types: &'static [&'static str],
 }
 
 /// A named group of routes owned by one HTTP service.
@@ -107,14 +114,42 @@ impl ApiCatalog {
                     }
                     operation = operation.parameter(builder.build());
                 }
-                let operation = operation
-                    .response(
-                        "200",
-                        ResponseBuilder::new()
-                            .description("Successful response")
+                if let Some(request_type) = route.request_type {
+                    let schema = ObjectBuilder::new()
+                        .schema_type(Type::Object)
+                        .description(Some(format!("JSON request body: {request_type}.")))
+                        .build();
+                    operation = operation.request_body(Some(
+                        RequestBodyBuilder::new()
+                            .description(Some(format!("Request body: {request_type}.")))
+                            .required(Some(Required::True))
+                            .content("application/json", Content::new(Some(schema)))
                             .build(),
-                    )
-                    .build();
+                    ));
+                }
+                let success_description = route.response_type.map_or_else(
+                    || "Successful response".to_owned(),
+                    |response_type| format!("Successful response containing {response_type}."),
+                );
+                let mut operation = operation.response(
+                    "200",
+                    ResponseBuilder::new()
+                        .description(success_description)
+                        .build(),
+                );
+                if !route.error_types.is_empty() {
+                    let error_description = format!(
+                        "Request failed with one of: {}.",
+                        route.error_types.join(", "),
+                    );
+                    operation = operation.response(
+                        "400",
+                        ResponseBuilder::new()
+                            .description(error_description)
+                            .build(),
+                    );
+                }
+                let operation = operation.build();
                 paths = paths.path(route.path, path_item(route.method, operation));
             }
         }

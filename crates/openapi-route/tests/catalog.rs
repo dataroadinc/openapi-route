@@ -6,7 +6,10 @@ use openapi_route::{ApiCatalog, ApiService, Method, openapi_handler};
     path = "/tasks/{id}",
     operation_id = "get_task",
     tag = "tasks",
-    parameter = "id"
+    parameter = "id",
+    request_type = "TaskRequest",
+    response_type = "Task",
+    error_type = "TaskError"
 )]
 /// Get task.
 ///
@@ -37,10 +40,16 @@ fn macro_generates_explicit_route_metadata() {
     assert_eq!(route.description, Some("Returns one task."));
     assert_eq!(route.tags, &["tasks"]);
     assert_eq!(route.parameters[0].name, "id");
+    assert_eq!(route.request_type, Some("TaskRequest"));
+    assert_eq!(route.response_type, Some("Task"));
+    assert_eq!(route.error_types, &["TaskError"]);
 }
 
 #[test]
 fn catalog_generates_openapi_paths_without_global_registration() {
     let document = CATALOG.document();
-    assert!(document.paths.paths.contains_key("/tasks/{id}"));
+    let path = document.paths.paths.get("/tasks/{id}").expect("path");
+    let operation = path.get.as_ref().expect("GET operation");
+    assert!(operation.request_body.is_some());
+    assert!(operation.responses.responses.contains_key("400"));
 }

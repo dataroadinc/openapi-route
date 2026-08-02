@@ -22,6 +22,13 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
         .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
     let tags = metadata.tags;
     let parameters = metadata.parameters;
+    let request_type = metadata
+        .request_type
+        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let response_type = metadata
+        .response_type
+        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let error_types = metadata.error_types;
     let parameter_tokens = parameters.iter().map(|parameter| {
         let name = &parameter.name;
         let description = parameter
@@ -49,6 +56,9 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
                 description: #description,
                 tags: &[#(#tags),*],
                 parameters: &[#(#parameter_tokens),*],
+                request_type: #request_type,
+                response_type: #response_type,
+                error_types: &[#(#error_types),*],
             };
     })
 }
@@ -116,6 +126,9 @@ struct Metadata {
     description: Option<LitStr>,
     tags: Vec<LitStr>,
     parameters: Vec<Parameter>,
+    request_type: Option<LitStr>,
+    response_type: Option<LitStr>,
+    error_types: Vec<LitStr>,
 }
 
 struct Parameter {
@@ -132,6 +145,9 @@ impl Parse for Metadata {
         let mut description = None;
         let mut tags = Vec::new();
         let mut parameters = Vec::new();
+        let mut request_type = None;
+        let mut response_type = None;
+        let mut error_types = Vec::new();
 
         while !input.is_empty() {
             let key: syn::Ident = input.parse()?;
@@ -148,6 +164,9 @@ impl Parse for Metadata {
                     name: value,
                     description: None,
                 }),
+                "request_type" => request_type = Some(value),
+                "response_type" => response_type = Some(value),
+                "error_type" => error_types.push(value),
                 _ => return Err(Error::new(key.span(), "unknown openapi_handler option")),
             }
             if input.peek(Comma) {
@@ -165,6 +184,9 @@ impl Parse for Metadata {
             description,
             tags,
             parameters,
+            request_type,
+            response_type,
+            error_types,
         })
     }
 }
