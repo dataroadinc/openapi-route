@@ -1,5 +1,10 @@
 use openapi_route::{ApiCatalog, ApiService, Method, openapi_handler};
 
+struct Json<T>(T);
+struct Request;
+struct Response;
+struct Error;
+
 #[allow(dead_code)]
 #[openapi_handler(
     method = "GET",
@@ -15,6 +20,12 @@ use openapi_route::{ApiCatalog, ApiService, Method, openapi_handler};
 ///
 /// Returns one task.
 fn get_task() {}
+
+#[allow(dead_code)]
+#[openapi_handler(method = "POST", path = "/tasks")]
+fn create_task(_body: Json<Request>) -> Result<Json<Response>, Error> {
+    panic!("test handler is never called")
+}
 
 static ROUTES: &[openapi_route::RouteMetadata] = &[OPENAPI_ROUTE_GET_TASK];
 
@@ -52,4 +63,12 @@ fn catalog_generates_openapi_paths_without_global_registration() {
     let operation = path.get.as_ref().expect("GET operation");
     assert!(operation.request_body.is_some());
     assert!(operation.responses.responses.contains_key("400"));
+}
+
+#[test]
+fn macro_infers_json_and_result_types() {
+    let route = &OPENAPI_ROUTE_CREATE_TASK;
+    assert_eq!(route.request_type, Some("Request"));
+    assert_eq!(route.response_type, Some("Json<Response>"));
+    assert_eq!(route.error_types, &["Error"]);
 }

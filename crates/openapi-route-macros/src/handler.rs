@@ -168,7 +168,27 @@ fn type_name(ty: &syn::Type) -> String {
             .path
             .segments
             .iter()
-            .map(|segment| segment.ident.to_string())
+            .map(|segment| {
+                let arguments = match &segment.arguments {
+                    syn::PathArguments::AngleBracketed(arguments) => {
+                        let types = arguments
+                            .args
+                            .iter()
+                            .filter_map(|argument| match argument {
+                                syn::GenericArgument::Type(ty) => Some(type_name(ty)),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>();
+                        if types.is_empty() {
+                            String::new()
+                        } else {
+                            format!("<{}>", types.join(", "))
+                        }
+                    }
+                    _ => String::new(),
+                };
+                format!("{}{}", segment.ident, arguments)
+            })
             .collect::<Vec<_>>()
             .join("::"),
         _ => "Response".to_owned(),
