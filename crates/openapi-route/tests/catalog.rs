@@ -35,6 +35,7 @@ fn create_task(_body: Json<Request>) -> Result<Json<Response>, Error> {
 
 static CATALOG: ApiCatalog = ApiCatalog {
     title: "Test API",
+    ui_title: "Test API Documentation",
     version: "0.1.0",
     services: &[&API_SERVICE],
 };

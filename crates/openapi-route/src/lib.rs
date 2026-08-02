@@ -110,6 +110,8 @@ impl ApiService {
 pub struct ApiCatalog {
     /// OpenAPI title.
     pub title: &'static str,
+    /// Browser title for the Swagger UI page.
+    pub ui_title: &'static str,
     /// OpenAPI version.
     pub version: &'static str,
     /// Services included in the document.

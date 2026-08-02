@@ -15,16 +15,31 @@ where
             "/openapi.json",
             get(move || async move { Json(catalog.document()) }),
         )
-        .route("/swagger-ui", get(swagger_ui))
-        .route("/swagger-ui/", get(swagger_ui))
+        .route(
+            "/swagger-ui",
+            get({
+                let title = catalog.ui_title;
+                move || async move { swagger_ui(title) }
+            }),
+        )
+        .route(
+            "/swagger-ui/",
+            get({
+                let title = catalog.ui_title;
+                move || async move { swagger_ui(title) }
+            }),
+        )
 }
 
-async fn swagger_ui() -> impl IntoResponse {
-    Html(
-        r#"<!DOCTYPE html>
+fn swagger_ui(title: &str) -> impl IntoResponse {
+    Html(swagger_html(title))
+}
+
+fn swagger_html(title: &str) -> String {
+    r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>API Documentation</title>
+    <title>__OPENAPI_ROUTE_UI_TITLE__</title>
     <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css" />
     <style>
         html { box-sizing: border-box; overflow-y: scroll; }
@@ -52,6 +67,17 @@ async fn swagger_ui() -> impl IntoResponse {
         };
     </script>
 </body>
-</html>"#,
-    )
+</html>"#
+        .replace("__OPENAPI_ROUTE_UI_TITLE__", title)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::swagger_html;
+
+    #[test]
+    fn swagger_html_uses_catalog_ui_title() {
+        let html = swagger_html("WWKG Gateway APIs");
+        assert!(html.contains("<title>WWKG Gateway APIs</title>"));
+    }
 }
