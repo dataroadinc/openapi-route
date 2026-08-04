@@ -1,6 +1,10 @@
+//! Expansion of `#[openapi_handler(...)]` into route metadata statics.
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{Error, ItemFn, LitStr, Result, parse::Parse, parse::ParseStream, token::Comma};
+use syn::{Error, ItemFn, LitStr, Result};
+
+use crate::parse::{Metadata, ParameterSpec, ResponseAttr};
 
 pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream> {
     let metadata: Metadata = syn::parse2(args)?;
@@ -11,49 +15,34 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
     let function_name = function.sig.ident.clone();
     let constant_name = format_ident!("OPENAPI_ROUTE_{}", function_name.to_string().to_uppercase());
     let method = method_tokens(&metadata.method)?;
-    let path = metadata.path;
+    let path = &metadata.path;
     let operation_id = metadata
         .operation_id
+        .clone()
         .unwrap_or_else(|| LitStr::new(&function_name.to_string(), function_name.span()));
     let (doc_summary, doc_description) = extract_docs(&function);
     let summary = metadata
         .summary
+        .clone()
         .or(doc_summary)
         .unwrap_or_else(|| LitStr::new(&function_name.to_string(), function_name.span()));
     let description = metadata
         .description
+        .clone()
         .or(doc_description)
         .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
-    let tags = metadata.tags;
-    let parameters = metadata.parameters;
-    let request_type = metadata
-        .request_type
-        .or_else(|| infer_json_type(&function))
-        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
-    let response_type = metadata
-        .response_type
-        .or_else(|| infer_result_type(&function, 0))
-        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
-    let inferred_error_type = infer_result_type(&function, 1);
-    let error_types = metadata.error_types;
-    let error_types = if error_types.is_empty() {
-        inferred_error_type.into_iter().collect::<Vec<_>>()
-    } else {
-        error_types
-    };
-    let parameter_tokens = parameters.iter().map(|parameter| {
-        let name = &parameter.name;
-        let description = parameter
-            .description
-            .as_ref()
-            .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
-        quote! {
-            ::openapi_route::RouteParameter {
-                name: #name,
-                description: #description,
-            }
-        }
-    });
+    let tags = &metadata.tags;
+    let parameter_tokens = metadata
+        .parameters
+        .iter()
+        .map(parameter_tokens)
+        .collect::<Result<Vec<_>>>()?;
+    let query_params = metadata.query_params.as_ref().map_or_else(
+        || quote! { None },
+        |ty| quote! { Some(::openapi_route::query_params::<#ty>) },
+    );
+    let request = request_tokens(&metadata, &function);
+    let responses = response_tokens(&metadata, &function);
 
     Ok(quote! {
         #function
@@ -68,9 +57,9 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
                 description: #description,
                 tags: &[#(#tags),*],
                 parameters: &[#(#parameter_tokens),*],
-                request_type: #request_type,
-                response_type: #response_type,
-                error_types: &[#(#error_types),*],
+                query_params: #query_params,
+                request: #request,
+                responses: &[#(#responses),*],
             };
 
         ::openapi_route::inventory::submit! {
@@ -80,6 +69,203 @@ pub(super) fn expand(args: TokenStream, function: ItemFn) -> Result<TokenStream>
             }
         }
     })
+}
+
+fn parameter_tokens(parameter: &ParameterSpec) -> Result<TokenStream> {
+    let name = &parameter.name;
+    let description = parameter
+        .description
+        .as_ref()
+        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let location = match parameter.location.as_ref().map(|value| value.value()) {
+        None => quote! { ::openapi_route::ParameterLocation::Path },
+        Some(value) => match value.as_str() {
+            "path" => quote! { ::openapi_route::ParameterLocation::Path },
+            "query" => quote! { ::openapi_route::ParameterLocation::Query },
+            "header" => quote! { ::openapi_route::ParameterLocation::Header },
+            _ => {
+                return Err(Error::new(
+                    parameter
+                        .location
+                        .as_ref()
+                        .expect("location present")
+                        .span(),
+                    "location must be \"path\", \"query\", or \"header\"",
+                ));
+            }
+        },
+    };
+    let required = parameter.required.as_ref().map_or_else(
+        || {
+            let default_required = parameter
+                .location
+                .as_ref()
+                .is_none_or(|value| value.value() == "path");
+            quote! { #default_required }
+        },
+        |value| quote! { #value },
+    );
+    let schema = parameter.schema.as_ref().map_or_else(
+        || quote! { None },
+        |ty| quote! { Some(::openapi_route::schema_set::<#ty>) },
+    );
+    Ok(quote! {
+        ::openapi_route::RouteParameter {
+            name: #name,
+            description: #description,
+            location: #location,
+            required: #required,
+            schema: #schema,
+        }
+    })
+}
+
+fn request_tokens(metadata: &Metadata, function: &ItemFn) -> TokenStream {
+    if let Some(ty) = &metadata.request_body {
+        let type_name = last_segment_name(ty);
+        return quote! {
+            Some(::openapi_route::RequestSpec {
+                type_name: Some(#type_name),
+                required: true,
+                contents: &[::openapi_route::ContentSpec {
+                    media_type: "application/json",
+                    schema: Some(::openapi_route::schema_set::<#ty>),
+                    example: None,
+                }],
+            })
+        };
+    }
+    let prose = metadata
+        .request_type
+        .clone()
+        .or_else(|| infer_json_type(function));
+    match prose {
+        Some(type_name) => quote! {
+            Some(::openapi_route::RequestSpec {
+                type_name: Some(#type_name),
+                required: true,
+                contents: &[::openapi_route::ContentSpec::PROSE_JSON],
+            })
+        },
+        None => quote! { None },
+    }
+}
+
+fn response_tokens(metadata: &Metadata, function: &ItemFn) -> Vec<TokenStream> {
+    let mut responses = Vec::new();
+    let mut has_success = false;
+    let mut has_error = false;
+    for attribute in &metadata.responses {
+        if attribute.is_error {
+            has_error = true;
+        } else {
+            has_success = true;
+        }
+        responses.push(response_attr_tokens(attribute));
+    }
+
+    if !has_success
+        && let Some(type_name) = metadata
+            .response_type
+            .clone()
+            .or_else(|| infer_result_type(function, 0))
+    {
+        let description = format!("Successful response containing {}.", type_name.value());
+        responses.insert(
+            0,
+            quote! {
+                ::openapi_route::ResponseSpec {
+                    status: 200,
+                    description: #description,
+                    type_name: Some(#type_name),
+                    contents: &[::openapi_route::ContentSpec::PROSE_JSON],
+                }
+            },
+        );
+    }
+
+    let mut error_names = metadata
+        .error_types
+        .iter()
+        .map(LitStr::value)
+        .collect::<Vec<_>>();
+    if error_names.is_empty()
+        && let Some(inferred) = infer_result_type(function, 1)
+    {
+        error_names.push(inferred.value());
+    }
+    if !has_error && !error_names.is_empty() {
+        let description = format!("Request failed with one of: {}.", error_names.join(", "));
+        responses.push(quote! {
+            ::openapi_route::ResponseSpec {
+                status: 400,
+                description: #description,
+                type_name: None,
+                contents: &[],
+            }
+        });
+    }
+    responses
+}
+
+fn response_attr_tokens(attribute: &ResponseAttr) -> TokenStream {
+    let status = &attribute.status;
+    let type_name_value = attribute.body.as_ref().map(last_segment_name);
+    let description_value = attribute.description.as_ref().map_or_else(
+        || default_response_description(attribute, type_name_value.as_deref()),
+        |value| value.value(),
+    );
+    let type_name = type_name_value
+        .as_ref()
+        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let media_type = attribute
+        .content
+        .as_ref()
+        .map_or_else(|| quote! { "application/json" }, |value| quote! { #value });
+    let example = attribute
+        .example
+        .as_ref()
+        .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+    let contents = match (&attribute.body, &attribute.content, &attribute.example) {
+        (None, None, None) => quote! { &[] },
+        (Some(ty), _, _) => quote! {
+            &[::openapi_route::ContentSpec {
+                media_type: #media_type,
+                schema: Some(::openapi_route::schema_set::<#ty>),
+                example: #example,
+            }]
+        },
+        (None, _, _) => quote! {
+            &[::openapi_route::ContentSpec {
+                media_type: #media_type,
+                schema: None,
+                example: #example,
+            }]
+        },
+    };
+    quote! {
+        ::openapi_route::ResponseSpec {
+            status: #status,
+            description: #description_value,
+            type_name: #type_name,
+            contents: #contents,
+        }
+    }
+}
+
+fn default_response_description(attribute: &ResponseAttr, type_name: Option<&str>) -> String {
+    match (attribute.is_error, type_name) {
+        (false, Some(name)) => format!("Successful response containing {name}."),
+        (false, None) => "Successful response".to_owned(),
+        (true, Some(name)) => format!("Request failed with {name}."),
+        (true, None) => "Error response".to_owned(),
+    }
+}
+
+fn last_segment_name(path: &syn::Path) -> String {
+    path.segments
+        .last()
+        .map_or_else(|| "Type".to_owned(), |segment| segment.ident.to_string())
 }
 
 fn extract_docs(function: &ItemFn) -> (Option<LitStr>, Option<LitStr>) {
@@ -222,84 +408,4 @@ fn method_tokens(method: &str) -> Result<TokenStream> {
         }
     };
     Ok(tokens)
-}
-
-struct Metadata {
-    service: Option<syn::Path>,
-    method: String,
-    path: LitStr,
-    operation_id: Option<LitStr>,
-    summary: Option<LitStr>,
-    description: Option<LitStr>,
-    tags: Vec<LitStr>,
-    parameters: Vec<Parameter>,
-    request_type: Option<LitStr>,
-    response_type: Option<LitStr>,
-    error_types: Vec<LitStr>,
-}
-
-struct Parameter {
-    name: LitStr,
-    description: Option<LitStr>,
-}
-
-impl Parse for Metadata {
-    fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let mut method = None;
-        let mut service = None;
-        let mut path = None;
-        let mut operation_id = None;
-        let mut summary = None;
-        let mut description = None;
-        let mut tags = Vec::new();
-        let mut parameters = Vec::new();
-        let mut request_type = None;
-        let mut response_type = None;
-        let mut error_types = Vec::new();
-
-        while !input.is_empty() {
-            let key: syn::Ident = input.parse()?;
-            input.parse::<syn::Token![=]>()?;
-            if key == "service" {
-                service = Some(input.parse()?);
-            } else {
-                let value: LitStr = input.parse()?;
-                match key.to_string().as_str() {
-                    "method" => method = Some(value.value()),
-                    "path" => path = Some(value),
-                    "operation_id" => operation_id = Some(value),
-                    "summary" => summary = Some(value),
-                    "description" => description = Some(value),
-                    "tag" => tags.push(value),
-                    "parameter" => parameters.push(Parameter {
-                        name: value,
-                        description: None,
-                    }),
-                    "request_type" => request_type = Some(value),
-                    "response_type" => response_type = Some(value),
-                    "error_type" => error_types.push(value),
-                    _ => return Err(Error::new(key.span(), "unknown openapi_handler option")),
-                }
-            }
-            if input.peek(Comma) {
-                input.parse::<Comma>()?;
-            }
-        }
-
-        Ok(Self {
-            service,
-            method: method
-                .ok_or_else(|| Error::new(proc_macro2::Span::call_site(), "method is required"))?,
-            path: path
-                .ok_or_else(|| Error::new(proc_macro2::Span::call_site(), "path is required"))?,
-            operation_id,
-            summary,
-            description,
-            tags,
-            parameters,
-            request_type,
-            response_type,
-            error_types,
-        })
-    }
 }

@@ -50,9 +50,15 @@ fn macro_generates_explicit_route_metadata() {
     assert_eq!(route.description, Some("Returns one task."));
     assert_eq!(route.tags, &["tasks"]);
     assert_eq!(route.parameters[0].name, "id");
-    assert_eq!(route.request_type, Some("TaskRequest"));
-    assert_eq!(route.response_type, Some("Task"));
-    assert_eq!(route.error_types, &["TaskError"]);
+    let request = route.request.as_ref().expect("request spec");
+    assert_eq!(request.type_name, Some("TaskRequest"));
+    assert_eq!(route.responses[0].status, 200);
+    assert_eq!(route.responses[0].type_name, Some("Task"));
+    assert_eq!(route.responses[1].status, 400);
+    assert_eq!(
+        route.responses[1].description,
+        "Request failed with one of: TaskError.",
+    );
 }
 
 #[test]
@@ -61,16 +67,18 @@ fn catalog_generates_openapi_paths_without_global_registration() {
     let path = document.paths.paths.get("/tasks/{id}").expect("path");
     let operation = path.get.as_ref().expect("GET operation");
     assert!(operation.request_body.is_some());
-    assert!(operation
-        .responses
-        .responses
-        .get("200")
-        .and_then(|response| match response {
-            utoipa::openapi::RefOr::T(response) => Some(&response.content),
-            utoipa::openapi::RefOr::Ref(_) => None,
-        })
-        .and_then(|content| content.get("application/json"))
-        .is_some());
+    assert!(
+        operation
+            .responses
+            .responses
+            .get("200")
+            .and_then(|response| match response {
+                utoipa::openapi::RefOr::T(response) => Some(&response.content),
+                utoipa::openapi::RefOr::Ref(_) => None,
+            })
+            .and_then(|content| content.get("application/json"))
+            .is_some()
+    );
     assert!(operation.responses.responses.contains_key("400"));
 }
 
@@ -84,7 +92,11 @@ fn catalog_collects_routes_registered_for_each_service() {
 #[test]
 fn macro_infers_json_and_result_types() {
     let route = &OPENAPI_ROUTE_CREATE_TASK;
-    assert_eq!(route.request_type, Some("Request"));
-    assert_eq!(route.response_type, Some("Json<Response>"));
-    assert_eq!(route.error_types, &["Error"]);
+    let request = route.request.as_ref().expect("inferred request spec");
+    assert_eq!(request.type_name, Some("Request"));
+    assert_eq!(route.responses[0].type_name, Some("Json<Response>"));
+    assert_eq!(
+        route.responses[1].description,
+        "Request failed with one of: Error.",
+    );
 }

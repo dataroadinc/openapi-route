@@ -4,6 +4,7 @@ use proc_macro::TokenStream;
 use syn::parse_macro_input;
 
 mod handler;
+mod parse;
 
 /// Annotate a handler and generate an explicit route metadata constant.
 #[proc_macro_attribute]
