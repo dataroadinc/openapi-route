@@ -280,6 +280,7 @@ version = "0.1.0"
 dependencies = [
  "inventory",
  "openapi-route-macros",
+ "serde_json",
  "utoipa",
 ]
 
