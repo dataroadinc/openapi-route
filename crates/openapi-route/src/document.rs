@@ -89,13 +89,44 @@ fn build_operation(
             .build();
         return operation.response("200", fallback).build();
     }
+    // Group specs by status so several entries for one status merge
+    // their representations instead of the last silently winning.
+    let mut seen: Vec<u16> = Vec::new();
     for response in route.responses {
+        if seen.contains(&response.status) {
+            continue;
+        }
+        seen.push(response.status);
+        let group: Vec<&ResponseSpec> = route
+            .responses
+            .iter()
+            .filter(|candidate| candidate.status == response.status)
+            .collect();
         operation = operation.response(
             response.status.to_string(),
-            build_response(response, components),
+            build_response_group(&group, components),
         );
     }
     operation.build()
+}
+
+/// Build one response from every spec declared for its status: the
+/// first spec's description, the union of all contents.
+fn build_response_group(
+    group: &[&ResponseSpec],
+    components: &mut BTreeMap<String, RefOr<Schema>>,
+) -> utoipa::openapi::response::Response {
+    let first = group.first().expect("group is non-empty");
+    let mut builder = ResponseBuilder::new().description(first.description);
+    for spec in group {
+        for content in spec.contents {
+            builder = builder.content(
+                content.media_type,
+                build_content(content, spec.type_name, "response", components),
+            );
+        }
+    }
+    builder.build()
 }
 
 fn build_parameter(
@@ -150,20 +181,6 @@ fn build_request_body(
         builder = builder.content(
             content.media_type,
             build_content(content, request.type_name, "request", components),
-        );
-    }
-    builder.build()
-}
-
-fn build_response(
-    response: &ResponseSpec,
-    components: &mut BTreeMap<String, RefOr<Schema>>,
-) -> utoipa::openapi::response::Response {
-    let mut builder = ResponseBuilder::new().description(response.description);
-    for content in response.contents {
-        builder = builder.content(
-            content.media_type,
-            build_content(content, response.type_name, "response", components),
         );
     }
     builder.build()
