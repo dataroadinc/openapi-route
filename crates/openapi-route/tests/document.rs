@@ -207,3 +207,51 @@ fn services_emit_tag_descriptions() {
         .expect("widgets tag");
     assert_eq!(widget_tag["description"], "Widget management operations.");
 }
+
+static MULTI_REPRESENTATION_ROUTE: RouteMetadata = RouteMetadata {
+    method: Method::Get,
+    path: "/api/v1/widget/{slug}/export",
+    operation_id: "export_widget",
+    summary: "Export a widget",
+    description: None,
+    tags: &["Widgets"],
+    parameters: &[],
+    query_params: None,
+    request: None,
+    responses: &[
+        ResponseSpec {
+            status: 200,
+            description: "The widget in the negotiated serialization.",
+            type_name: None,
+            contents: &[ContentSpec {
+                media_type: "text/turtle",
+                schema: None,
+                example: None,
+            }],
+        },
+        ResponseSpec {
+            status: 200,
+            description: "ignored — first description wins",
+            type_name: None,
+            contents: &[ContentSpec {
+                media_type: "application/n-triples",
+                schema: None,
+                example: None,
+            }],
+        },
+    ],
+};
+
+register_route!(SERVICE, MULTI_REPRESENTATION_ROUTE);
+
+#[test]
+fn same_status_specs_merge_their_representations() {
+    let document = document();
+    let ok = &document["paths"]["/api/v1/widget/{slug}/export"]["get"]["responses"]["200"];
+    assert_eq!(
+        ok["description"],
+        "The widget in the negotiated serialization."
+    );
+    assert!(ok["content"]["text/turtle"].is_object(), "{ok}");
+    assert!(ok["content"]["application/n-triples"].is_object(), "{ok}");
+}
