@@ -100,3 +100,24 @@ fn macro_infers_json_and_result_types() {
         "Request failed with one of: Error.",
     );
 }
+
+#[allow(dead_code)]
+#[openapi_handler(
+    service = API_SERVICE,
+    method = "POST",
+    path = "/tasks/import",
+    request_content = "text/turtle",
+    request_content = "application/n-triples",
+    request_type = "RdfDocument"
+)]
+/// Import RDF.
+fn import_rdf() {}
+
+#[test]
+fn request_content_declares_raw_media_types() {
+    let route = &OPENAPI_ROUTE_IMPORT_RDF;
+    let request = route.request.as_ref().expect("raw request spec");
+    assert_eq!(request.type_name, Some("RdfDocument"));
+    let media: Vec<&str> = request.contents.iter().map(|c| c.media_type).collect();
+    assert_eq!(media, ["text/turtle", "application/n-triples"]);
+}

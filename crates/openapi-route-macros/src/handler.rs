@@ -123,12 +123,16 @@ fn parameter_tokens(parameter: &ParameterSpec) -> Result<TokenStream> {
 fn request_tokens(metadata: &Metadata, function: &ItemFn) -> TokenStream {
     if let Some(ty) = &metadata.request_body {
         let type_name = last_segment_name(ty);
+        let media_type = metadata
+            .request_content
+            .first()
+            .map_or_else(|| quote! { "application/json" }, |value| quote! { #value });
         return quote! {
             Some(::openapi_route::RequestSpec {
                 type_name: Some(#type_name),
                 required: true,
                 contents: &[::openapi_route::ContentSpec {
-                    media_type: "application/json",
+                    media_type: #media_type,
                     schema: Some(::openapi_route::schema_set::<#ty>),
                     example: None,
                 }],
@@ -139,6 +143,29 @@ fn request_tokens(metadata: &Metadata, function: &ItemFn) -> TokenStream {
         .request_type
         .clone()
         .or_else(|| infer_json_type(function));
+    if !metadata.request_content.is_empty() {
+        // Raw (non-Serde) request representations: one prose content
+        // entry per declared media type, no schema.
+        let type_name = prose
+            .as_ref()
+            .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+        let contents = metadata.request_content.iter().map(|media_type| {
+            quote! {
+                ::openapi_route::ContentSpec {
+                    media_type: #media_type,
+                    schema: None,
+                    example: None,
+                }
+            }
+        });
+        return quote! {
+            Some(::openapi_route::RequestSpec {
+                type_name: #type_name,
+                required: true,
+                contents: &[#(#contents),*],
+            })
+        };
+    }
     match prose {
         Some(type_name) => quote! {
             Some(::openapi_route::RequestSpec {
